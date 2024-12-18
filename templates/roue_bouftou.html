@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jackpot Interface</title>
+    <style>
+        /* Général */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            background-color: #f7f9fc;
+            color: #333;
+            text-align: center;
+        }
+
+        h1 {
+            margin: 20px 0;
+            font-size: 2.5em;
+            color: #2c3e50;
+        }
+
+        h2 {
+            margin-top: 20px;
+            font-size: 1.5em;
+            color: #34495e;
+        }
+
+        p {
+            margin: 10px 0;
+            font-size: 1.2em;
+        }
+
+        /* Boutons */
+        .button {
+            margin: 10px;
+            padding: 12px 25px;
+            font-size: 1em;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.2s ease-in-out;
+        }
+
+        .button:hover {
+            transform: scale(1.05);
+            opacity: 0.9;
+        }
+
+        .increment { background-color: #27ae60; }
+        .decrement { background-color: #e74c3c; }
+        .jackpot { background-color: #2ecc71; }
+        .reset { background-color: #f39c12; }
+
+        /* Input */
+        input[type="number"] {
+            width: 80px;
+            padding: 8px;
+            font-size: 1.1em;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        /* Table */
+        table {
+            width: 80%;
+            margin: 20px auto;
+            border-collapse: collapse;
+            background: #fff;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        table th, table td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        table th {
+            background-color: #34495e;
+            color: white;
+        }
+
+        table tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        table tr:hover {
+            background-color: #dff0d8;
+        }
+
+        /* Conteneurs */
+        .container {
+            margin: 20px auto;
+            max-width: 800px;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            table {
+                width: 100%;
+            }
+
+            .button {
+                width: 80%;
+            }
+
+            input[type="number"] {
+                width: 60px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Jackpot Interface</h1>
+        <p>Nombre de joueurs : <span id="num-players">{{ num_players }}</span></p>
+        <button class="button increment" onclick="updatePlayers('increment')">+</button>
+        <button class="button decrement" onclick="updatePlayers('decrement')">-</button>
+
+        <h2>Tickets dépensés par joueur/sec</h2>
+        <input type="number" id="tickets-input" step="0.05" min="0" max="3" value="{{ avg_tickets_per_second }}">
+
+        <h2>Temps estimé entre les Jackpots</h2>
+        <p id="estimate-time">N/A</p>
+
+        <button class="button jackpot" onclick="startJackpotTimer()">Jackpot remporté !</button>
+        <button class="button reset" onclick="resetAll()">Reset</button>
+
+        <h2>Minuteur</h2>
+        <p id="timer-message" style="font-size: 2em; color: #16a085;">{{ timer_message }}</p>
+        
+        <h2>Temps entre les Jackpots</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Durée</th>
+                </tr>
+            </thead>
+            <tbody id="time-list">
+                <!-- Temps s'affichera ici -->
+            </tbody>
+        </table>
+
+        <script>
+            let estimatedTimeLeft = 0; // Temps estimé en secondes
+            let countdownInterval = null; // Pour le décompte dynamique
+            let timerRunning = false; // Suivi de l'état du minuteur
+            let lastUpdateTime = Date.now(); // Dernier moment où le timer a été mis à jour
+        
+            // Lance ou ajuste le décompte dynamique
+            function startCountdown(newTime) {
+                const currentTime = Date.now();
+                const elapsedTime = Math.floor((currentTime - lastUpdateTime) / 1000);
+        
+                // Ajuste le temps restant en tenant compte du temps écoulé
+                if (newTime) {
+                    estimatedTimeLeft += newTime - elapsedTime;
+                } else {
+                    estimatedTimeLeft -= elapsedTime;
+                }
+        
+                lastUpdateTime = currentTime;
+        
+                if (countdownInterval) clearInterval(countdownInterval); // Stoppe l'ancien intervalle
+        
+                countdownInterval = setInterval(() => {
+                    if (estimatedTimeLeft > 0) {
+                        estimatedTimeLeft--;
+                        updateCountdownDisplay();
+                    } else {
+                        clearInterval(countdownInterval);
+                        estimatedTimeLeft = 0;
+                        updateCountdownDisplay();
+                    }
+                }, 1000);
+            }
+        
+            // Affiche le temps restant en minutes et secondes
+            function updateCountdownDisplay() {
+                const mins = Math.floor(estimatedTimeLeft / 60);
+                const secs = estimatedTimeLeft % 60;
+                document.getElementById('estimate-time').textContent = `${mins} min ${secs} sec`;
+            }
+        
+            // Récupère et ajuste dynamiquement le temps estimé
+            function calculateEstimate() {
+                fetch('/calculate_estimate')
+                    .then(response => response.json())
+                    .then(data => {
+                        const match = data.estimated_time.match(/(\d+) min (\d+) sec/);
+                        if (match) {
+                            const mins = parseInt(match[1]);
+                            const secs = parseInt(match[2]);
+                            const totalSeconds = mins * 60 + secs;
+        
+                            // Ajuste le décompte dynamique
+                            startCountdown(totalSeconds);
+                        }
+                    });
+            }
+        
+            // Met à jour les tickets dépensés dynamiquement
+            document.getElementById('tickets-input').addEventListener('input', function () {
+                const tickets = this.value;
+                fetch('/update_tickets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ tickets })
+                }).then(() => calculateEstimate());
+            });
+        
+            // Met à jour le nombre de joueurs
+            function updatePlayers(action) {
+                fetch('/update_players', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ action })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('num-players').textContent = data.num_players;
+                    calculateEstimate();
+                });
+            }
+        
+            // Gère le jackpot et enregistre les temps entre jackpots
+            function startJackpotTimer() {
+                fetch('/start_jackpot_timer', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => updateTimeList(data.time_between_jackpots));
+            }
+        
+            // Met à jour la liste des temps entre jackpots
+            function updateTimeList(times) {
+                const timeList = document.getElementById('time-list');
+                timeList.innerHTML = ""; // Vide la liste
+                times.forEach(time => {
+                    const [index, duration] = time.split('. ');
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td>${index}</td><td>${duration}</td>`;
+                    timeList.appendChild(row);
+                });
+            }
+        
+            // Réinitialise l'interface et le minuteur
+            function resetAll() {
+                fetch('/reset', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('timer-message').textContent = data.timer_message;
+                        document.getElementById('estimate-time').textContent = "N/A";
+                        updateTimeList(data.time_between_jackpots);
+                        clearInterval(countdownInterval);
+                        estimatedTimeLeft = 0;
+                    });
+            }
+        
+            // Met à jour en temps réel le minuteur principal et la liste
+            setInterval(() => {
+                fetch('/get_timer_status')
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('timer-message').textContent = data.timer_message;
+                        updateTimeList(data.time_between_jackpots);
+                    });
+            }, 1000);
+        
+            // Initialisation
+            calculateEstimate();
+        </script>
+        
+        
+</body>
+</html>

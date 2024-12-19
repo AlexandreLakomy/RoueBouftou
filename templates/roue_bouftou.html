@@ -159,58 +159,87 @@
             let countdownInterval = null; // Pour le décompte dynamique
             let timerRunning = false; // Suivi de l'état du minuteur
             let lastUpdateTime = Date.now(); // Dernier moment où le timer a été mis à jour
-        
-            // Lance ou ajuste le décompte dynamique
-            function startCountdown(newTime) {
-                const currentTime = Date.now();
-                const elapsedTime = Math.floor((currentTime - lastUpdateTime) / 1000);
-        
-                // Ajuste le temps restant en tenant compte du temps écoulé
-                if (newTime) {
-                    estimatedTimeLeft += newTime - elapsedTime;
-                } else {
-                    estimatedTimeLeft -= elapsedTime;
+            
+            window.onload = function () {
+                // Réinitialise l'affichage à chaque chargement
+                document.getElementById('estimate-time').textContent = "N/A";
+                document.getElementById('timer-message').textContent = "00:00";
+
+                // Arrête tout intervalle frontend
+                if (countdownInterval) {
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
                 }
-        
-                lastUpdateTime = currentTime;
-        
-                if (countdownInterval) clearInterval(countdownInterval); // Stoppe l'ancien intervalle
-        
-                countdownInterval = setInterval(() => {
-                    if (estimatedTimeLeft > 0) {
-                        estimatedTimeLeft--;
-                        updateCountdownDisplay();
-                    } else {
-                        clearInterval(countdownInterval);
-                        estimatedTimeLeft = 0;
-                        updateCountdownDisplay();
-                    }
-                }, 1000);
-            }
-        
-            // Affiche le temps restant en minutes et secondes
-            function updateCountdownDisplay() {
-                const mins = Math.floor(estimatedTimeLeft / 60);
-                const secs = estimatedTimeLeft % 60;
-                document.getElementById('estimate-time').textContent = `${mins} min ${secs} sec`;
-            }
-        
-            // Récupère et ajuste dynamiquement le temps estimé
+
+                estimatedTimeLeft = 0;
+
+                // Stoppe le minuteur côté backend
+                fetch('/stop_timer', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log(data.status); // Confirmation que le backend est arrêté
+                    });
+            };
+
+
+
+
             function calculateEstimate() {
                 fetch('/calculate_estimate')
                     .then(response => response.json())
                     .then(data => {
-                        const match = data.estimated_time.match(/(\d+) min (\d+) sec/);
-                        if (match) {
-                            const mins = parseInt(match[1]);
-                            const secs = parseInt(match[2]);
-                            const totalSeconds = mins * 60 + secs;
-        
-                            // Ajuste le décompte dynamique
-                            startCountdown(totalSeconds);
-                        }
+                        const remainingSeconds = data.remaining_seconds; // Temps restant recalculé
+                        const elapsedSeconds = data.elapsed_seconds; // Temps déjà écoulé
+                        estimatedTimeLeft = remainingSeconds; // Met à jour la variable globale
+
+                        // Met à jour l'affichage
+                        startCountdown();
+
+                        // Mise à jour explicite des champs
+                        updateCountdownDisplay(estimatedTimeLeft);
+                        console.log(`Temps écoulé: ${elapsedSeconds} secondes`);
                     });
             }
+            
+            function updateCountdownDisplay(timeLeft) {
+                if (isNaN(timeLeft) || timeLeft < 0) {
+                    document.getElementById('estimate-time').textContent = "N/A";
+                    return;
+                }
+
+                const mins = Math.floor(timeLeft / 60);
+                const secs = Math.floor(timeLeft % 60);
+                document.getElementById('estimate-time').textContent = `${mins} min ${secs} sec`;
+            }
+
+            // Lors de la mise à jour des tickets, recalcul dynamique
+            document.getElementById('tickets-input').addEventListener('input', function () {
+                const tickets = this.value;
+                fetch('/update_tickets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ tickets })
+                }).then(() => calculateEstimate());
+            });
+
+            function startCountdown() {
+                // Affiche immédiatement le temps estimé
+                updateCountdownDisplay(estimatedTimeLeft);
+
+                if (countdownInterval) clearInterval(countdownInterval); // Stop l'ancien intervalle
+
+                countdownInterval = setInterval(() => {
+                    if (estimatedTimeLeft > 0) {
+                        estimatedTimeLeft--;
+                        updateCountdownDisplay(estimatedTimeLeft);
+                    } else {
+                        clearInterval(countdownInterval);
+                        updateCountdownDisplay(0);
+                    }
+                }, 1000);
+            }
+
+
         
             // Met à jour les tickets dépensés dynamiquement
             document.getElementById('tickets-input').addEventListener('input', function () {
@@ -236,12 +265,23 @@
                 });
             }
         
-            // Gère le jackpot et enregistre les temps entre jackpots
             function startJackpotTimer() {
                 fetch('/start_jackpot_timer', { method: 'POST' })
                     .then(response => response.json())
-                    .then(data => updateTimeList(data.time_between_jackpots));
+                    .then(data => {
+                        // Affiche immédiatement le temps estimé
+                        document.getElementById('estimate-time').textContent = data.estimated_time;
+
+                        // Réinitialise le minuteur
+                        document.getElementById('timer-message').textContent = data.timer_message;
+
+                        // Démarre le décompte dynamique
+                        estimatedTimeLeft = 1000 / parseFloat(document.getElementById('tickets-input').value || 1);
+                        startCountdown();
+                    });
             }
+
+
         
             // Met à jour la liste des temps entre jackpots
             function updateTimeList(times) {
@@ -255,18 +295,26 @@
                 });
             }
         
-            // Réinitialise l'interface et le minuteur
             function resetAll() {
                 fetch('/reset', { method: 'POST' })
                     .then(response => response.json())
                     .then(data => {
+                        // Réinitialise l'affichage
                         document.getElementById('timer-message').textContent = data.timer_message;
                         document.getElementById('estimate-time').textContent = "N/A";
+
+                        // Réinitialise la liste des temps
                         updateTimeList(data.time_between_jackpots);
-                        clearInterval(countdownInterval);
-                        estimatedTimeLeft = 0;
+
+                        // Arrête le compteur et réinitialise la valeur globale
+                        if (countdownInterval) {
+                            clearInterval(countdownInterval); // Arrête le compteur
+                            countdownInterval = null; // Réinitialise l'intervalle
+                        }
+                        estimatedTimeLeft = 0; // Réinitialise le temps estimé
                     });
             }
+
         
             // Met à jour en temps réel le minuteur principal et la liste
             setInterval(() => {

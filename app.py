@@ -13,25 +13,44 @@ jackpot_timer_seconds = 0  # Minuteur pour le jackpot
 time_between_jackpots = []  # Liste pour stocker les temps entre deux jackpots
 last_jackpot_time = 0  # Temps de la dernière activation du jackpot
 jackpot_thread = None  # Pour suivre le thread du chronomètre
+minuteur_demarree = False
 
-# Helper function to manage the jackpot timer
+
 def jackpot_timer():
     global jackpot_timer_seconds, timer_running
     jackpot_timer_seconds = 0
     timer_running = True
+
+    # Incrémente immédiatement avant la première pause
     while timer_running:
-        time.sleep(1)
         jackpot_timer_seconds += 1
+        time.sleep(1)
+        if not timer_running:
+            break
+
+
 
 @app.route("/")
 def roue_bouftou():
+    global timer_running, jackpot_timer_seconds, minuteur_demarree
+
+    # Réinitialise l'état du minuteur et du démarrage
+    timer_running = False
+    jackpot_timer_seconds = 0
+    minuteur_demarree = False
+
+    # Stoppe explicitement le minuteur pour éviter tout état résiduel
+    stop_timer()
+
     return render_template(
         "roue_bouftou.html",
         num_players=num_players,
-        timer_message=timer_message,
+        timer_message="00:00",
         time_between_jackpots=time_between_jackpots,
         avg_tickets_per_second=avg_tickets_per_second,
+        estimated_time="N/A"
     )
+
 
 @app.route("/update_players", methods=["POST"])
 def update_players():
@@ -57,64 +76,102 @@ def update_tickets():
         avg_tickets_per_second = 1.0
     return jsonify({"avg_tickets_per_second": avg_tickets_per_second})
 
+
 @app.route("/calculate_estimate", methods=["GET"])
 def calculate_estimate():
-    global avg_tickets_per_second, num_players, estimated_seconds_left
+    global avg_tickets_per_second, jackpot_timer_seconds, minuteur_demarree
+
+    if not minuteur_demarree:  # Si le minuteur n'a pas commencé
+        return jsonify({"estimated_time": "N/A", "remaining_seconds": None})
+
     if avg_tickets_per_second > 0:
-        new_total_seconds = 1000 / avg_tickets_per_second
-        # Ajuste le temps restant au lieu de réinitialiser complètement
-        if "estimated_seconds_left" in globals():
-            difference = new_total_seconds - estimated_seconds_left
-            estimated_seconds_left += difference
-        else:
-            estimated_seconds_left = new_total_seconds
-        mins, secs = divmod(int(estimated_seconds_left), 60)
+        total_seconds = 1000 / avg_tickets_per_second
+        remaining_seconds = total_seconds - jackpot_timer_seconds
+        remaining_seconds = max(0, remaining_seconds)  # Empêcher des valeurs négatives
+        mins, secs = divmod(int(remaining_seconds), 60)
         estimated_time = f"{mins} min {secs} sec"
     else:
         estimated_time = "N/A"
-    return jsonify({"estimated_time": estimated_time, "remaining_seconds": estimated_seconds_left})
+        remaining_seconds = 0
+
+    return jsonify({
+        "estimated_time": estimated_time,
+        "remaining_seconds": remaining_seconds,
+    })
+
+
 
 
 @app.route("/start_jackpot_timer", methods=["POST"])
 def start_jackpot_timer():
-    global timer_running, jackpot_thread, last_jackpot_time, time_between_jackpots, jackpot_timer_seconds
+    global timer_running, jackpot_thread, jackpot_timer_seconds, minuteur_demarree
+
+    # Active le flag pour démarrer le minuteur
+    minuteur_demarree = True
+
+    # Vérifie que le minuteur n'est pas déjà en cours
+    if not timer_running:
+        jackpot_timer_seconds = 0  # Réinitialise le compteur
+
+        # Arrête tout thread existant (par précaution)
+        if jackpot_thread and jackpot_thread.is_alive():
+            jackpot_thread.join()
+
+        # Lance un nouveau thread
+        jackpot_thread = threading.Thread(target=jackpot_timer)
+        jackpot_thread.start()
+        timer_running = True
+
+    # Recalcule immédiatement le temps estimé
+    if avg_tickets_per_second > 0:
+        total_seconds = 1000 / avg_tickets_per_second - jackpot_timer_seconds
+        total_seconds = max(0, total_seconds)  # Empêche les valeurs négatives
+        mins, secs = divmod(int(total_seconds), 60)
+        estimated_time = f"{mins} min {secs} sec"
+    else:
+        estimated_time = "N/A"
+
+    return jsonify({
+        "status": "success",
+        "timer_message": "00:00",
+        "estimated_time": estimated_time,
+    })
+
+
+@app.route("/stop_timer", methods=["POST"])
+def stop_timer():
+    global timer_running, jackpot_thread, jackpot_timer_seconds
 
     if timer_running:
-        # Si le minuteur tourne déjà, enregistre le temps écoulé
-        mins, secs = divmod(jackpot_timer_seconds, 60)
-        time_between_jackpots.insert(0, f"{len(time_between_jackpots) + 1}. {mins} min {secs} sec")
-        timer_running = False  # Arrête le minuteur
-        jackpot_thread.join()  # Attend que le thread se termine
-        jackpot_timer_seconds = 0  # Réinitialise le temps
+        timer_running = False  # Stop le flag principal
+        if jackpot_thread and jackpot_thread.is_alive():
+            jackpot_thread.join()  # Arrête le thread backend
 
-        # Relance un nouveau timer
-        jackpot_thread = threading.Thread(target=jackpot_timer)
-        jackpot_thread.start()
-        timer_running = True
-        return jsonify({
-            "status": "success",
-            "time_between_jackpots": time_between_jackpots,
-        })
-    else:
-        # Lance le timer pour la première fois
-        jackpot_thread = threading.Thread(target=jackpot_timer)
-        jackpot_thread.start()
-        timer_running = True
-        last_jackpot_time = time.time()
-        return jsonify({"status": "success"})
+    # Réinitialise complètement le minuteur
+    jackpot_timer_seconds = 0
+    return jsonify({"status": "stopped", "timer_message": "00:00"})
+
+
 
 @app.route("/reset", methods=["POST"])
 def reset():
-    global time_between_jackpots, jackpot_timer_seconds, timer_running
-    # Réinitialise les variables
+    global time_between_jackpots, jackpot_timer_seconds, timer_running, jackpot_thread, minuteur_demarree
+
+    minuteur_demarree = False  # Réinitialise le flag
+    if timer_running:
+        timer_running = False
+        if jackpot_thread and jackpot_thread.is_alive():
+            jackpot_thread.join()
+
     time_between_jackpots = []
     jackpot_timer_seconds = 0
-    timer_running = False
     return jsonify({
         "status": "success",
         "timer_message": "00:00",
         "time_between_jackpots": time_between_jackpots,
     })
+
+
 
 @app.route("/get_timer_status", methods=["GET"])
 def get_timer_status():

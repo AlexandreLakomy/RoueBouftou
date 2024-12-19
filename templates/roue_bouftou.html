@@ -130,7 +130,7 @@
         <button class="button decrement" onclick="updatePlayers('decrement')">-</button>
 
         <h2>Tickets dépensés par joueur/sec</h2>
-        <input type="number" id="tickets-input" step="0.05" min="0" max="3" value="{{ avg_tickets_per_second }}">
+        <input type="number" id="tickets-input" step="0.05" min="0" max="100" value="{{ avg_tickets_per_second }}">
 
         <h2>Temps estimé entre les Jackpots</h2>
         <p id="estimate-time">N/A</p>
@@ -147,6 +147,7 @@
                 <tr>
                     <th>#</th>
                     <th>Durée</th>
+                    <th>Tickets/sec théorique</th>
                 </tr>
             </thead>
             <tbody id="time-list">
@@ -275,6 +276,9 @@
                         // Réinitialise le minuteur
                         document.getElementById('timer-message').textContent = data.timer_message;
 
+                        // Met à jour le tableau avec les anciens temps
+                        updateTimeList(data.time_between_jackpots);
+
                         // Démarre le décompte dynamique
                         estimatedTimeLeft = 1000 / parseFloat(document.getElementById('tickets-input').value || 1);
                         startCountdown();
@@ -282,18 +286,25 @@
             }
 
 
+
         
             // Met à jour la liste des temps entre jackpots
             function updateTimeList(times) {
                 const timeList = document.getElementById('time-list');
-                timeList.innerHTML = ""; // Vide la liste
-                times.forEach(time => {
-                    const [index, duration] = time.split('. ');
+                timeList.innerHTML = ""; // Vide la liste avant de la remplir
+
+                times.forEach((entry, index) => {
                     const row = document.createElement('tr');
-                    row.innerHTML = `<td>${index}</td><td>${duration}</td>`;
+                    row.innerHTML = `
+                        <td>${index + 1}</td>
+                        <td>${entry.duration}</td>
+                        <td>${entry.tickets_per_second}</td> <!-- Affiche les tickets/joueur/sec -->
+                    `;
                     timeList.appendChild(row);
                 });
             }
+
+
         
             function resetAll() {
                 fetch('/reset', { method: 'POST' })

@@ -18,15 +18,14 @@ minuteur_demarree = False
 
 def jackpot_timer():
     global jackpot_timer_seconds, timer_running
-    jackpot_timer_seconds = 0
-    timer_running = True
 
-    # Incrémente immédiatement avant la première pause
     while timer_running:
-        jackpot_timer_seconds += 1
-        time.sleep(1)
+        time.sleep(1)  # Attente de 1 seconde
         if not timer_running:
             break
+        jackpot_timer_seconds += 1  # Incrémente le compteur
+
+
 
 
 
@@ -104,14 +103,28 @@ def calculate_estimate():
 
 @app.route("/start_jackpot_timer", methods=["POST"])
 def start_jackpot_timer():
-    global timer_running, jackpot_thread, jackpot_timer_seconds, minuteur_demarree
+    global timer_running, jackpot_thread, jackpot_timer_seconds, minuteur_demarree, time_between_jackpots
 
-    # Active le flag pour démarrer le minuteur
+    # Stocke l'ancienne valeur dans le tableau si le minuteur était actif
+    if timer_running:
+        mins, secs = divmod(jackpot_timer_seconds, 60)
+        duration = jackpot_timer_seconds  # Temps écoulé en secondes
+        if duration > 0:
+            tickets_per_second = round(1000 / duration, 2)  # Calcul des tickets dépensés par joueur/sec
+        else:
+            tickets_per_second = 0
+        time_between_jackpots.insert(0, {
+            "duration": f"{mins} min {secs} sec",
+            "tickets_per_second": tickets_per_second
+        })
+
+    # Réinitialise le compteur et démarre le minuteur
+    jackpot_timer_seconds = 0  # Réinitialise le compteur
     minuteur_demarree = True
 
     # Vérifie que le minuteur n'est pas déjà en cours
     if not timer_running:
-        jackpot_timer_seconds = 0  # Réinitialise le compteur
+        timer_running = True
 
         # Arrête tout thread existant (par précaution)
         if jackpot_thread and jackpot_thread.is_alive():
@@ -120,12 +133,10 @@ def start_jackpot_timer():
         # Lance un nouveau thread
         jackpot_thread = threading.Thread(target=jackpot_timer)
         jackpot_thread.start()
-        timer_running = True
 
     # Recalcule immédiatement le temps estimé
     if avg_tickets_per_second > 0:
-        total_seconds = 1000 / avg_tickets_per_second - jackpot_timer_seconds
-        total_seconds = max(0, total_seconds)  # Empêche les valeurs négatives
+        total_seconds = 1000 / avg_tickets_per_second
         mins, secs = divmod(int(total_seconds), 60)
         estimated_time = f"{mins} min {secs} sec"
     else:
@@ -135,7 +146,11 @@ def start_jackpot_timer():
         "status": "success",
         "timer_message": "00:00",
         "estimated_time": estimated_time,
+        "time_between_jackpots": time_between_jackpots  # Envoie la liste mise à jour
     })
+
+
+
 
 
 @app.route("/stop_timer", methods=["POST"])
